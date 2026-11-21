@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "payfx",
+  "version": "${version}",
+  "name": "PayFX",
+  "description": "Effekte, wenn dir jemand Geld bezahlt - je hoeher der Betrag, desto groesser der Effekt.",
+  "authors": ["User"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["de.payfx.PayFx"]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.0",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
