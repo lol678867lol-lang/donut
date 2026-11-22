@@ -6,6 +6,7 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
+import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemLore;
@@ -85,12 +86,23 @@ final class Guard {
         return firstAny;
     }
 
+    /** Slot unter der Maus in einem Kisten-Fenster (Standard-Layout, 176 Pixel breit). */
+    private static Slot slotAt(AbstractContainerScreen<?> acs, Screen screen, double mx, double my) {
+        if (!(acs.getMenu() instanceof ChestMenu cm)) return null;
+        int left = (screen.width - 176) / 2;
+        int top = (screen.height - (114 + cm.getRowCount() * 18)) / 2;
+        for (Slot s : cm.slots) {
+            if (mx >= left + s.x - 1 && mx < left + s.x + 17 && my >= top + s.y - 1 && my < top + s.y + 17) return s;
+        }
+        return null;
+    }
+
     /** Klick in einem Container-Fenster. false = Klick wird blockiert. */
-    static boolean allowClick(Screen screen) {
+    static boolean allowClick(Screen screen, double mx, double my) {
         if (!Cfg.ahConfirm) return true;
         if (!(screen instanceof AbstractContainerScreen<?> acs)) return true;
         if (!screen.getTitle().getString().toLowerCase(Locale.ROOT).contains(Cfg.ahTitle.toLowerCase(Locale.ROOT))) return true;
-        Slot s = acs.getSlotUnderMouse();
+        Slot s = slotAt(acs, screen, mx, my);
         if (s == null || !s.hasItem()) return true;
         double price = priceOf(s.getItem());
         if (price <= Cfg.ahLimit) return true;

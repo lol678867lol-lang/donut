@@ -1,6 +1,8 @@
 package de.payfx;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -34,6 +36,12 @@ final class Shortcut {
         } else if (mc.hitResult instanceof EntityHitResult ehr && ehr.getEntity() instanceof ItemEntity ie) {
             name = BuiltInRegistries.ITEM.getKey(ie.getItem().getItem()).getPath().replace('_', ' ');
         }
-        screen.insertText("/" + Cfg.shortMode + " " + name, true);
+        // Das Eingabefeld des Chats ist ein oeffentliches Kind-Element des Fensters
+        for (GuiEventListener c : screen.children()) {
+            if (c instanceof EditBox eb) {
+                eb.setValue("/" + Cfg.shortMode + " " + name);
+                break;
+            }
+        }
     }
 }

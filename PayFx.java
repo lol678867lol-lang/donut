@@ -419,7 +419,7 @@ public class PayFx implements ClientModInitializer {
                 say(client, "Fenster-Titel: " + screen.getTitle().getString());
             }
             if (screen instanceof AbstractContainerScreen<?>) {
-                ScreenMouseEvents.allowMouseClick(screen).register((sc, click) -> Guard.allowClick(sc));
+                ScreenMouseEvents.allowMouseClick(screen).register((sc, click) -> Guard.allowClick(sc, click.x(), click.y()));
             }
         });
 
