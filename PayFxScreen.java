@@ -17,10 +17,11 @@ import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.DoubleFunction;
 
-/** Menue (Taste C): alles einstellen. Klick = an/aus bzw. Wert aendern (links vom Wert = kleiner, rechts = groesser). Mausrad scrollt. */
+/** Menu (C key): configure everything. Click = toggle or change a value (left of the value = lower, right = higher). Mouse wheel scrolls. */
 public class PayFxScreen extends Screen {
     private static final int ROW = 18, W = 300, TOP = 36;
     private static final double[] AMOUNTS = {100e3, 250e3, 500e3, 1e6, 2e6, 5e6, 10e6, 25e6, 50e6, 100e6, 250e6, 500e6, 1e9, 2e9, 5e9, 10e9};
+    private static final double[] TAX = {0, 1, 2, 3, 4, 5, 7.5, 10, 12.5, 15, 20, 25, 30};
     private static final double[] MINUTES = {0, 1, 2, 3, 5, 10, 15, 30, 60};
     private static final double[] MINBID = {0, 100e3, 500e3, 1e6, 5e6, 10e6, 50e6, 100e6, 500e6, 1e9};
     private static final double[] DISTS = {1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0};
@@ -52,7 +53,7 @@ public class PayFxScreen extends Screen {
 
     private Row toggle(String label, BooleanSupplier get, Consumer<Boolean> set) {
         return new Row(label) {
-            String value() { return get.getAsBoolean() ? "AN" : "AUS"; }
+            String value() { return get.getAsBoolean() ? "ON" : "OFF"; }
             int color() { return get.getAsBoolean() ? 0xFF5CFF7A : 0xFFFF6A6A; }
             void click(int dir) { set.accept(!get.getAsBoolean()); }
         };
@@ -89,39 +90,69 @@ public class PayFxScreen extends Screen {
 
     public PayFxScreen() {
         super(Component.literal("PayFX"));
-        rows.add(header("Zahlungs-Effekte"));
-        rows.add(toggle("Effekte insgesamt", () -> Cfg.effects, v -> Cfg.effects = v));
+        rows.add(header("Payment effects"));
+        rows.add(toggle("Effects (master switch)", () -> Cfg.effects, v -> Cfg.effects = v));
         rows.add(toggle("Sounds", () -> Cfg.sounds, v -> Cfg.sounds = v));
-        rows.add(toggle("Bildschirm-Blitz", () -> Cfg.flash, v -> Cfg.flash = v));
-        rows.add(toggle("Kamera wackeln (Crazy)", () -> Cfg.shake, v -> Cfg.shake = v));
-        rows.add(header("Stufen: Betrag, ab dem die Stufe gilt"));
-        String[] names = {"Klein", "Mittel", "Gross", "Sehr gross", "Crazy"};
+        rows.add(toggle("Screen flash", () -> Cfg.flash, v -> Cfg.flash = v));
+        rows.add(toggle("Camera shake (Crazy)", () -> Cfg.shake, v -> Cfg.shake = v));
+        rows.add(header("Tiers: amount above which the tier applies"));
+        String[] names = {"Small", "Medium", "Large", "Huge", "Crazy"};
         for (int i = 0; i < 5; i++) {
             final int k = i;
-            rows.add(stepper(names[i] + " ab mehr als", AMOUNTS, () -> Cfg.tiers[k], v -> setTier(k, v), PayFx::fmt));
-            rows.add(toggle(names[i] + "-Effekt", () -> Cfg.tierOn[k], v -> Cfg.tierOn[k] = v));
+            rows.add(stepper(names[i] + " above", AMOUNTS, () -> Cfg.tiers[k], v -> setTier(k, v), PayFx::fmt));
+            rows.add(toggle(names[i] + " effect", () -> Cfg.tierOn[k], v -> Cfg.tierOn[k] = v));
         }
-        rows.add(header("Warnungen"));
-        rows.add(toggle("Pay-Warnung", () -> Cfg.payWarn, v -> Cfg.payWarn = v));
-        rows.add(stepper("  ab mehr als", AMOUNTS, () -> Cfg.payLimit, v -> Cfg.payLimit = v, PayFx::fmt));
-        rows.add(toggle("AH-Bestaetigung", () -> Cfg.ahConfirm, v -> Cfg.ahConfirm = v));
-        rows.add(stepper("  ab mehr als", AMOUNTS, () -> Cfg.ahLimit, v -> Cfg.ahLimit = v, PayFx::fmt));
-        rows.add(header("Auktion"));
-        rows.add(toggle("Auktion anzeigen", () -> Cfg.auctionShow, v -> Cfg.auctionShow = v));
-        rows.add(stepper("Abstand des Items", DISTS, () -> Cfg.auctionDist, v -> Cfg.auctionDist = v, d -> d + " Bloecke"));
-        rows.add(stepper("Dauer (0 = ohne Zeit)", MINUTES, () -> Cfg.auctionMinutes, v -> Cfg.auctionMinutes = v, d -> d == 0 ? "ohne Zeit" : (int) (double) d + " Min"));
-        rows.add(stepper("Mindestgebot", MINBID, () -> Cfg.auctionMin, v -> Cfg.auctionMin = v, d -> d == 0 ? "keins" : PayFx.fmt(d)));
-        rows.add(toggle("Fuehrung im Chat ansagen", () -> Cfg.auctionSay, v -> Cfg.auctionSay = v));
-        rows.add(header("Verlauf"));
-        rows.add(action("Zahlungs-Verlauf", "oeffnen", () -> {
+        rows.add(header("Warnings"));
+        rows.add(toggle("Pay warning", () -> Cfg.payWarn, v -> Cfg.payWarn = v));
+        rows.add(stepper("  above", AMOUNTS, () -> Cfg.payLimit, v -> Cfg.payLimit = v, PayFx::fmt));
+        rows.add(toggle("AH confirmation", () -> Cfg.ahConfirm, v -> Cfg.ahConfirm = v));
+        rows.add(stepper("  above", AMOUNTS, () -> Cfg.ahLimit, v -> Cfg.ahLimit = v, PayFx::fmt));
+        rows.add(header("Auction"));
+        rows.add(toggle("Show auction", () -> Cfg.auctionShow, v -> Cfg.auctionShow = v));
+        rows.add(stepper("Item distance", DISTS, () -> Cfg.auctionDist, v -> Cfg.auctionDist = v, d -> d + " blocks"));
+        rows.add(stepper("Duration (0 = no limit)", MINUTES, () -> Cfg.auctionMinutes, v -> Cfg.auctionMinutes = v, d -> d == 0 ? "no limit" : (int) (double) d + " min"));
+        rows.add(stepper("Minimum bid", MINBID, () -> Cfg.auctionMin, v -> Cfg.auctionMin = v, d -> d == 0 ? "none" : PayFx.fmt(d)));
+        rows.add(toggle("Announce leader in chat", () -> Cfg.auctionSay, v -> Cfg.auctionSay = v));
+        rows.add(header("Profit & statistics"));
+        rows.add(stepper("Tax on income", TAX, () -> Cfg.taxPercent, v -> Cfg.taxPercent = v, d -> d + "%"));
+        rows.add(toggle("Show session profit on screen", () -> Cfg.profitHud, v -> Cfg.profitHud = v));
+        rows.add(new Row("Pay list on screen (last 5)") {
+            String value() {
+                return switch (Cfg.payListMode) {
+                    case "received" -> "received only (green)";
+                    case "sent" -> "sent only (red)";
+                    case "off" -> "off";
+                    default -> "both";
+                };
+            }
+            int color() {
+                return switch (Cfg.payListMode) {
+                    case "received" -> 0xFF66FF99;
+                    case "sent" -> 0xFFFF6A6A;
+                    case "off" -> 0xFF7A7A90;
+                    default -> 0xFFFFD166;
+                };
+            }
+            void click(int dir) {
+                String[] m = {"both", "received", "sent", "off"};
+                int i = 0;
+                for (int k = 0; k < m.length; k++) if (m[k].equals(Cfg.payListMode)) i = k;
+                Cfg.payListMode = m[(i + (dir > 0 ? 1 : m.length - 1)) % m.length];
+            }
+        });
+        rows.add(action("Statistics (profit, history)", "open", () -> {
             Minecraft m = Minecraft.getInstance();
             m.setScreen(new HistoryScreen());
         }));
-        rows.add(header("Shortcut (Taste T)"));
-        rows.add(toggle("T-Shortcut (Block im Blick)", () -> Cfg.tShortcut, v -> Cfg.tShortcut = v));
-        rows.add(toggle("Nur mit gedruecktem Mausrad", () -> Cfg.needMiddle, v -> Cfg.needMiddle = v));
-        rows.add(new Row("Befehl") {
-            String value() { return "/" + Cfg.shortMode + "  (klicken)"; }
+        rows.add(action("Auction log (worth, search)", "open", () -> {
+            Minecraft m = Minecraft.getInstance();
+            m.setScreen(new AuctionScreen());
+        }));
+        rows.add(header("Shortcut (T key)"));
+        rows.add(toggle("T shortcut (block in view)", () -> Cfg.tShortcut, v -> Cfg.tShortcut = v));
+        rows.add(toggle("Only with mouse wheel pressed", () -> Cfg.needMiddle, v -> Cfg.needMiddle = v));
+        rows.add(new Row("Command") {
+            String value() { return "/" + Cfg.shortMode + "  (click)"; }
             int color() { return 0xFFFFD166; }
             void click(int dir) { Cfg.shortMode = Cfg.shortMode.equals("ah") ? "order" : "ah"; }
         });
@@ -130,7 +161,7 @@ public class PayFxScreen extends Screen {
     @Override
     protected void init() {
         x0 = (width - W) / 2;
-        ahBox = new EditBox(font, x0, height - 64, W, 14, Component.literal("Auktionshaus-Titel"));
+        ahBox = new EditBox(font, x0, height - 64, W, 14, Component.literal("Auction house title"));
         ahBox.setMaxLength(60);
         ahBox.setValue(Cfg.ahTitle);
         ahBox.setResponder(v -> {
@@ -138,7 +169,7 @@ public class PayFxScreen extends Screen {
             Cfg.save();
         });
         addWidget(ahBox);
-        rxBox = new EditBox(font, x0, height - 38, W, 14, Component.literal("Zahlungs-Muster"));
+        rxBox = new EditBox(font, x0, height - 38, W, 14, Component.literal("Payment pattern"));
         rxBox.setMaxLength(400);
         rxBox.setValue(Cfg.regex);
         rxBox.setResponder(v -> rxOk = PayFx.setRegex(v));
@@ -180,13 +211,13 @@ public class PayFxScreen extends Screen {
         }
         g.fill(0, 0, width, TOP - 6, 0xE00A0A14);
         g.fill(0, height - 80, width, height, 0xF00A0A14);
-        g.drawString(font, "Auktionshaus-Fenstertitel (Teil des Titels, z.B. auction)", x0, height - 76, 0xFFB8B8C8);
-        g.drawString(font, "Zahlungs-Muster (Regex mit name / num / suf)" + (rxOk ? "" : "  - UNGUELTIG"), x0, height - 50, rxOk ? 0xFFB8B8C8 : 0xFFFF6A6A);
+        g.drawString(font, "Auction house window title (part of the title, e.g. auction)", x0, height - 76, 0xFFB8B8C8);
+        g.drawString(font, "Payment pattern (regex with name / num / suf)" + (rxOk ? "" : "  - INVALID"), x0, height - 50, rxOk ? 0xFFB8B8C8 : 0xFFFF6A6A);
         ahBox.render(g, mx, my, delta);
         rxBox.render(g, mx, my, delta);
         String title = "P A Y F X";
         g.drawString(font, title, (width - font.width(title)) / 2, 12, 0xFFFFD166);
-        String hint = "Klick: an/aus oder Wert (links < kleiner, rechts > groesser)   Mausrad: scrollen   ESC: zu";
+        String hint = "Click: toggle or change value (left of value = lower, right = higher)   Mouse wheel: scroll   ESC: close";
         g.drawString(font, hint, (width - font.width(hint)) / 2, height - 14, 0xFF7A7A90);
     }
 

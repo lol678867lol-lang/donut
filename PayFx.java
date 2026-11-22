@@ -53,6 +53,8 @@ public class PayFx implements ClientModInitializer {
     private static Pattern pattern = Pattern.compile(Cfg.DEFAULT_REGEX);
     static boolean debug;
     static boolean learn;
+    static boolean learnExpense;
+    private static Pattern expensePattern;
     private static final Random RNG = new Random();
 
     // laufender Effekt
@@ -91,13 +93,17 @@ public class PayFx implements ClientModInitializer {
         }
     }
 
-    /** "5m", "250k", "1.5b", "$30m" oder "1200000" -> Zahl, -1 bei Fehler. */
+    /** "5m", "250k", "1.5b", "$30m" or "1200000" -> number, -1 on error. */
     static double parseAmount(String raw) {
         String s = raw.toLowerCase(Locale.ROOT).replace("$", "").trim();
         if (s.isEmpty()) return -1;
         String suffix = s.substring(s.length() - 1);
         if (suffix.length() == 1 && "kmbt".contains(suffix)) return parse(s.substring(0, s.length() - 1), suffix);
         return parse(s, "");
+    }
+
+    static String fmtSigned(double v) {
+        return (v < 0 ? "-" : "+") + fmt(Math.abs(v));
     }
 
     static String fmt(double a) {
@@ -126,12 +132,36 @@ public class PayFx implements ClientModInitializer {
         if (mc.player != null) mc.player.displayClientMessage(Component.literal("[PayFX] " + s), false);
     }
 
+    private static String lastText = "";
+    private static long lastAt;
+
     private static void onMessage(String text) {
         Minecraft mc = Minecraft.getInstance();
-        if (debug && (text.contains("$") || text.toLowerCase(Locale.ROOT).contains("pay"))) say(mc, "Nachricht: " + text);
+        // The same message can arrive twice (chat + action bar) - only count it once
+        long now = System.currentTimeMillis();
+        if (text.equals(lastText) && now - lastAt < 1500) return;
+        lastText = text;
+        lastAt = now;
+        if (debug && (text.contains("$") || text.toLowerCase(Locale.ROOT).contains("pay"))) say(mc, "Message: " + text);
         if (learn && text.contains("$")) {
             learnFrom(mc, text);
             return;
+        }
+        if (expensePattern != null) {
+            Matcher em = expensePattern.matcher(text);
+            if (em.find()) {
+                try {
+                    double ea = parse(em.group("num"), em.group("suf") == null ? "" : em.group("suf"));
+                    String en = "?";
+                    try {
+                        en = em.group("name");
+                    } catch (IllegalArgumentException ignored) {
+                    }
+                    if (ea > 0 && !Guard.isEchoOfOwnPay(ea)) History.add(en == null ? "?" : en, ea, false);
+                } catch (IllegalArgumentException ignored) {
+                }
+                return;
+            }
         }
         Matcher m = pattern.matcher(text);
         if (!m.find()) return;
@@ -149,7 +179,7 @@ public class PayFx implements ClientModInitializer {
         if (who == null || num == null) return;
         double a = parse(num, suf == null ? "" : suf);
         if (a < 0) return;
-        History.add(who, a);
+        History.add(who, a, true);
         Auction.pay(who, a);
         if (Cfg.effects) trigger(mc, who, a);
     }
@@ -174,7 +204,7 @@ public class PayFx implements ClientModInitializer {
             break;
         }
         if (ns < 0) {
-            say(mc, "Konnte den Namen nicht erkennen. Nachricht: " + text);
+            say(mc, "Could not detect the name. Message: " + text);
             learn = false;
             return;
         }
@@ -187,21 +217,42 @@ public class PayFx implements ClientModInitializer {
             rx = amtRx + Pattern.quote(text.substring(am.end(), ns)) + nameRx;
         }
         try {
-            pattern = Pattern.compile(rx);
-            Cfg.regex = rx;
+            if (learnExpense) {
+                expensePattern = Pattern.compile(rx);
+                Cfg.expenseRegex = rx;
+            } else {
+                pattern = Pattern.compile(rx);
+                Cfg.regex = rx;
+            }
             Cfg.save();
             learn = false;
-            say(mc, "Gelernt! Name '" + text.substring(ns, ne) + "', Betrag '" + am.group(1) + am.group(2) + "'. Muster gespeichert.");
+            say(mc, "Learned! Name '" + text.substring(ns, ne) + "', amount '" + am.group(1) + am.group(2) + "'. "
+                    + (learnExpense ? "Messages like this now count as an expense." : "Pattern saved."));
         } catch (Exception e) {
-            say(mc, "Lernen fehlgeschlagen: " + e.getMessage());
+            say(mc, "Learning failed: " + e.getMessage());
             learn = false;
         }
     }
 
+    private static final java.util.ArrayDeque<Object[]> QUEUE = new java.util.ArrayDeque<>();
+
     static void trigger(Minecraft mc, String who, double a) {
         Tier t = tierOf(a);
-        if (debug) say(mc, "Zahlung erkannt: " + who + " " + fmt(a) + " -> " + t);
+        if (debug) say(mc, "Payment detected: " + who + " " + fmt(a) + " -> " + t);
         if (t == Tier.NONE || mc.player == null || !Cfg.tierOn[t.ordinal() - 1]) return;
+        // An effect is still running: a bigger one takes over, a smaller one waits its turn
+        if (tier != Tier.NONE) {
+            if (t.ordinal() > tier.ordinal()) {
+                start(mc, who, a, t);
+            } else if (QUEUE.size() < 8) {
+                QUEUE.add(new Object[]{who, a});
+            }
+            return;
+        }
+        start(mc, who, a, t);
+    }
+
+    private static void start(Minecraft mc, String who, double a, Tier t) {
         tier = t;
         age = 0;
         payer = who;
@@ -209,18 +260,20 @@ public class PayFx implements ClientModInitializer {
         sound(mc, t == Tier.SMALL ? SoundEvents.EXPERIENCE_ORB_PICKUP : SoundEvents.PLAYER_LEVELUP, 1.0F);
         mc.gui.setTimes(5, Math.min(60, t.ticks / 2), 15);
         if (t != Tier.SMALL) {
-            mc.gui.setSubtitle(Component.literal(who + " hat dir " + fmt(a) + " gezahlt").withStyle(Style.EMPTY.withColor(0xFFE066)));
+            mc.gui.setSubtitle(Component.literal(who + " paid you " + fmt(a)).withStyle(Style.EMPTY.withColor(0xFFE066)));
             mc.gui.setTitle(Component.literal(titleOf(t)).withStyle(Style.EMPTY.withColor(colorOf(t))));
         } else {
-            mc.gui.setOverlayMessage(Component.literal("+" + fmt(a) + " von " + who).withStyle(Style.EMPTY.withColor(0x66FF99)), false);
+            // Action bar text is easily overwritten by the server, so also write it to the chat
+            mc.gui.setOverlayMessage(Component.literal("+" + fmt(a) + " from " + who).withStyle(Style.EMPTY.withColor(0x66FF99)), false);
+            say(mc, "+" + fmt(a) + " from " + who);
         }
     }
 
     private static String titleOf(Tier t) {
         switch (t) {
-            case MEDIUM: return "ZAHLUNG!";
-            case LARGE: return "GROSSE ZAHLUNG!";
-            case HUGE: return "RIESIGE ZAHLUNG!!";
+            case MEDIUM: return "PAYMENT!";
+            case LARGE: return "BIG PAYMENT!";
+            case HUGE: return "HUGE PAYMENT!!";
             default: return "JACKPOT!!!";
         }
     }
@@ -265,6 +318,8 @@ public class PayFx implements ClientModInitializer {
         age++;
         if (age > tier.ticks) {
             tier = Tier.NONE;
+            Object[] next = QUEUE.poll();
+            if (next != null) trigger(mc, (String) next[0], (Double) next[1]);
             return;
         }
         LocalPlayer p = mc.player;
@@ -325,7 +380,7 @@ public class PayFx implements ClientModInitializer {
                 if (age % 3 == 0) {
                     mc.gui.setTimes(0, 20, 10);
                     mc.gui.setTitle(Component.literal("JACKPOT!!! " + fmt(amount) + " !!!").withStyle(Style.EMPTY.withColor(hsv((age % 30) / 30.0F))));
-                    mc.gui.setSubtitle(Component.literal(payer + " ist verrueckt geworden").withStyle(Style.EMPTY.withColor(hsv(((age + 15) % 30) / 30.0F))));
+                    mc.gui.setSubtitle(Component.literal(payer + " went absolutely crazy").withStyle(Style.EMPTY.withColor(hsv(((age + 15) % 30) / 30.0F))));
                 }
                 break;
         }
@@ -342,7 +397,7 @@ public class PayFx implements ClientModInitializer {
         else y = 2;
         if (y < -22) return;
         double shown = amount * Math.min(1.0, age / 40.0);
-        String s = "+" + fmt(shown) + "   von " + payer;
+        String s = "+" + fmt(shown) + "   from " + payer;
         int w = mc.font.width(s) + 40;
         int x = (W - w) / 2;
         int c = colorOf(tier);
@@ -354,6 +409,8 @@ public class PayFx implements ClientModInitializer {
 
     private static void hud(GuiGraphics g, Minecraft mc) {
         Auction.hud(g, mc);
+        History.hud(g, mc);
+        History.payList(g, mc);
         banner(g, mc);
         if (tier == Tier.NONE || tier == Tier.SMALL || !Cfg.flash) return;
         int W = mc.getWindow().getGuiScaledWidth(), H = mc.getWindow().getGuiScaledHeight();
@@ -388,6 +445,11 @@ public class PayFx implements ClientModInitializer {
     public void onInitializeClient() {
         Cfg.load();
         History.load();
+        AuctionLog.load();
+        try {
+            if (!Cfg.expenseRegex.isEmpty()) expensePattern = Pattern.compile(Cfg.expenseRegex);
+        } catch (Exception ignored) {
+        }
         try {
             pattern = Pattern.compile(Cfg.regex);
         } catch (Exception e) {
@@ -398,12 +460,15 @@ public class PayFx implements ClientModInitializer {
         KeyMapping openGui = KeyBindingHelper.registerKeyBinding(new KeyMapping(
                 "key.payfx.gui", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_C, category));
 
-        ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
-            if (!overlay) onMessage(message.getString());
-        });
+        // System messages and action bar text (many servers send payments there) ...
+        ClientReceiveMessageEvents.GAME.register((message, overlay) -> onMessage(message.getString()));
+        // ... and normal chat messages
+        ClientReceiveMessageEvents.CHAT.register((message, signed, sender, params, time) -> onMessage(message.getString()));
 
         // Gesendete Befehle: grosse /pay abfangen
         ClientSendMessageEvents.ALLOW_COMMAND.register(Guard::allowCommand);
+
+        ClientTickEvents.START_CLIENT_TICK.register(Shortcut::poll);
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
             while (openGui.consumeClick()) {
@@ -416,7 +481,7 @@ public class PayFx implements ClientModInitializer {
         ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
             Shortcut.onScreen(client, screen);
             if (debug && screen instanceof AbstractContainerScreen<?>) {
-                say(client, "Fenster-Titel: " + screen.getTitle().getString());
+                say(client, "Window title: " + screen.getTitle().getString());
             }
             if (screen instanceof AbstractContainerScreen<?>) {
                 ScreenMouseEvents.allowMouseClick(screen).register((sc, click) -> Guard.allowClick(sc, click.x(), click.y()));
@@ -432,19 +497,95 @@ public class PayFx implements ClientModInitializer {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
             dispatcher.register(ClientCommandManager.literal("payfx")
                 .then(ClientCommandManager.literal("test")
-                    .then(ClientCommandManager.argument("betrag", StringArgumentType.word()).executes(ctx -> {
-                        double a = parseAmount(StringArgumentType.getString(ctx, "betrag"));
+                    .then(ClientCommandManager.argument("amount", StringArgumentType.word()).executes(ctx -> {
+                        double a = parseAmount(StringArgumentType.getString(ctx, "amount"));
                         if (a < 0) {
-                            ctx.getSource().sendFeedback(Component.literal("Betrag nicht lesbar. Beispiele: 600k, 5m, 30m, 300m, 2b"));
+                            ctx.getSource().sendFeedback(Component.literal("Could not read the amount. Examples: 600k, 5m, 30m, 300m, 2b"));
                             return 0;
                         }
-                        ctx.getSource().sendFeedback(Component.literal("Test: " + fmt(a) + " -> Stufe " + tierOf(a)));
+                        ctx.getSource().sendFeedback(Component.literal("Test: " + fmt(a) + " -> tier " + tierOf(a)));
                         trigger(Minecraft.getInstance(), "Tester", a);
                         return 1;
                     })))
-                .then(ClientCommandManager.literal("learn").executes(ctx -> {
+                .then(ClientCommandManager.literal("tax")
+                    .then(ClientCommandManager.argument("percent", StringArgumentType.word()).executes(ctx -> {
+                        try {
+                            double t = Double.parseDouble(StringArgumentType.getString(ctx, "percent").replace("%", "").replace(",", "."));
+                            if (t < 0 || t > 100) return 0;
+                            Cfg.taxPercent = t;
+                            Cfg.save();
+                            ctx.getSource().sendFeedback(Component.literal("Tax set to " + t + "% (subtracted from received payments in the statistics)."));
+                            return 1;
+                        } catch (NumberFormatException e) {
+                            ctx.getSource().sendFeedback(Component.literal("Use a number, e.g. /payfx tax 5"));
+                            return 0;
+                        }
+                    })))
+                .then(ClientCommandManager.literal("expense")
+                    .then(ClientCommandManager.argument("amount", StringArgumentType.word()).executes(ctx -> {
+                        double a = parseAmount(StringArgumentType.getString(ctx, "amount"));
+                        if (a <= 0) return 0;
+                        History.add("manual", a, false);
+                        ctx.getSource().sendFeedback(Component.literal("Expense recorded: " + fmt(a)));
+                        return 1;
+                    })))
+                .then(ClientCommandManager.literal("income")
+                    .then(ClientCommandManager.argument("amount", StringArgumentType.word()).executes(ctx -> {
+                        double a = parseAmount(StringArgumentType.getString(ctx, "amount"));
+                        if (a <= 0) return 0;
+                        History.add("manual", a, true);
+                        ctx.getSource().sendFeedback(Component.literal("Income recorded: " + fmt(a)));
+                        return 1;
+                    })))
+                .then(ClientCommandManager.literal("paylist")
+                    .then(ClientCommandManager.argument("mode", StringArgumentType.word()).executes(ctx -> {
+                        String md = StringArgumentType.getString(ctx, "mode").toLowerCase(Locale.ROOT);
+                        if (!java.util.List.of("both", "received", "sent", "off").contains(md)) {
+                            ctx.getSource().sendFeedback(Component.literal("Use: /payfx paylist both | received | sent | off"));
+                            return 0;
+                        }
+                        Cfg.payListMode = md;
+                        Cfg.save();
+                        ctx.getSource().sendFeedback(Component.literal("Pay list: " + md));
+                        return 1;
+                    })))
+                .then(ClientCommandManager.literal("undo").executes(ctx -> {
+                    History.Entry e = History.undoLast();
+                    ctx.getSource().sendFeedback(Component.literal(e == null ? "Nothing to undo."
+                            : "Removed: " + (e.income() ? "income " : "expense ") + fmt(e.amount()) + " (" + e.name() + ")"));
+                    return 1;
+                }))
+                .then(ClientCommandManager.literal("session").executes(ctx -> {
+                    History.sessionStart = System.currentTimeMillis();
+                    ctx.getSource().sendFeedback(Component.literal("Session profit reset to 0."));
+                    return 1;
+                }))
+                .then(ClientCommandManager.literal("profit").executes(ctx -> {
+                    long[] since = {History.sessionStart, History.startOfToday(), 0L};
+                    String[] n = {"Session", "Today", "All time"};
+                    for (int i = 0; i < 3; i++) {
+                        ctx.getSource().sendFeedback(Component.literal(n[i] + ": in " + fmt(History.sum(true, since[i]))
+                                + " - tax " + fmt(History.tax(since[i])) + " - out " + fmt(History.sum(false, since[i]))
+                                + "  =  " + fmtSigned(History.net(since[i]))));
+                    }
+                    return 1;
+                }))
+                .then(ClientCommandManager.literal("stats").executes(ctx -> {
+                    Minecraft m = Minecraft.getInstance();
+                    m.execute(() -> m.setScreen(new HistoryScreen()));
+                    return 1;
+                }))
+                .then(ClientCommandManager.literal("learn")
+                    .then(ClientCommandManager.literal("expense").executes(ctx -> {
+                        learn = true;
+                        learnExpense = true;
+                        ctx.getSource().sendFeedback(Component.literal("Learn mode (expense): the next message containing $ is learned as a message about money you SPENT (it needs a player name in it, e.g. 'You paid Steve $5M')."));
+                        return 1;
+                    }))
+                    .executes(ctx -> {
+                    learnExpense = false;
                     learn = true;
-                    ctx.getSource().sendFeedback(Component.literal("Lernmodus: Lass dir jetzt etwas bezahlen (oder /payfx test geht nicht). Die naechste Nachricht mit $ wird als Zahlungsformat gelernt."));
+                    ctx.getSource().sendFeedback(Component.literal("Learn mode: have someone pay you now. The next message containing $ is learned as the payment format."));
                     return 1;
                 }))
                 .then(ClientCommandManager.literal("history").executes(ctx -> {
@@ -452,62 +593,62 @@ public class PayFx implements ClientModInitializer {
                     m.execute(() -> m.setScreen(new HistoryScreen()));
                     return 1;
                 }))
-                .then(ClientCommandManager.literal("ja").executes(ctx -> {
-                    if (!Guard.confirm()) ctx.getSource().sendFeedback(Component.literal("Nichts zu bestaetigen."));
+                .then(ClientCommandManager.literal("yes").executes(ctx -> {
+                    if (!Guard.confirm()) ctx.getSource().sendFeedback(Component.literal("Nothing to confirm."));
                     return 1;
                 }))
                 .then(ClientCommandManager.literal("debug").executes(ctx -> {
                     debug = !debug;
-                    ctx.getSource().sendFeedback(Component.literal("Debug " + (debug ? "AN: Nachrichten mit $ oder 'pay' und Fenstertitel werden angezeigt." : "aus")));
+                    ctx.getSource().sendFeedback(Component.literal("Debug " + (debug ? "ON: messages containing $ or 'pay' and window titles are shown." : "off")));
                     return 1;
                 }))
                 .then(ClientCommandManager.literal("limit")
                     .then(ClientCommandManager.literal("pay")
-                        .then(ClientCommandManager.argument("betrag", StringArgumentType.word()).executes(ctx -> {
-                            double a = parseAmount(StringArgumentType.getString(ctx, "betrag"));
+                        .then(ClientCommandManager.argument("amount", StringArgumentType.word()).executes(ctx -> {
+                            double a = parseAmount(StringArgumentType.getString(ctx, "amount"));
                             if (a < 0) return 0;
                             Cfg.payLimit = a;
                             Cfg.save();
-                            ctx.getSource().sendFeedback(Component.literal("Pay-Warnung ab " + fmt(a)));
+                            ctx.getSource().sendFeedback(Component.literal("Pay warning above " + fmt(a)));
                             return 1;
                         })))
                     .then(ClientCommandManager.literal("ah")
-                        .then(ClientCommandManager.argument("betrag", StringArgumentType.word()).executes(ctx -> {
-                            double a = parseAmount(StringArgumentType.getString(ctx, "betrag"));
+                        .then(ClientCommandManager.argument("amount", StringArgumentType.word()).executes(ctx -> {
+                            double a = parseAmount(StringArgumentType.getString(ctx, "amount"));
                             if (a < 0) return 0;
                             Cfg.ahLimit = a;
                             Cfg.save();
-                            ctx.getSource().sendFeedback(Component.literal("AH-Bestaetigung ab " + fmt(a)));
+                            ctx.getSource().sendFeedback(Component.literal("AH confirmation above " + fmt(a)));
                             return 1;
                         }))))
                 .then(ClientCommandManager.literal("ahtitle")
                     .then(ClientCommandManager.argument("text", StringArgumentType.greedyString()).executes(ctx -> {
                         Cfg.ahTitle = StringArgumentType.getString(ctx, "text").trim();
                         Cfg.save();
-                        ctx.getSource().sendFeedback(Component.literal("Auktionshaus-Fenster erkannt an: '" + Cfg.ahTitle + "'"));
+                        ctx.getSource().sendFeedback(Component.literal("Auction house window detected by: '" + Cfg.ahTitle + "'"));
                         return 1;
                     })))
                 .then(ClientCommandManager.literal("reset").executes(ctx -> {
                     Cfg.regex = Cfg.DEFAULT_REGEX;
                     pattern = Pattern.compile(Cfg.DEFAULT_REGEX);
                     Cfg.save();
-                    ctx.getSource().sendFeedback(Component.literal("Muster zurueckgesetzt."));
+                    ctx.getSource().sendFeedback(Component.literal("Pattern reset."));
                     return 1;
                 }))
                 .then(ClientCommandManager.literal("regex")
                     .executes(ctx -> {
-                        ctx.getSource().sendFeedback(Component.literal("Muster: " + pattern.pattern() + "   (Gruppe 1 Name, 2 Zahl, 3 k/m/b/t)"));
+                        ctx.getSource().sendFeedback(Component.literal("Pattern: " + pattern.pattern() + "   (group 1 name, 2 number, 3 k/m/b/t)"));
                         return 1;
                     })
-                    .then(ClientCommandManager.argument("muster", StringArgumentType.greedyString()).executes(ctx -> {
-                        String r = StringArgumentType.getString(ctx, "muster");
+                    .then(ClientCommandManager.argument("pattern", StringArgumentType.greedyString()).executes(ctx -> {
+                        String r = StringArgumentType.getString(ctx, "pattern");
                         try {
                             pattern = Pattern.compile(r);
                             Cfg.regex = r;
                             Cfg.save();
-                            ctx.getSource().sendFeedback(Component.literal("Muster gespeichert."));
+                            ctx.getSource().sendFeedback(Component.literal("Pattern saved."));
                         } catch (Exception e) {
-                            ctx.getSource().sendFeedback(Component.literal("Ungueltiges Muster: " + e.getMessage()));
+                            ctx.getSource().sendFeedback(Component.literal("Invalid pattern: " + e.getMessage()));
                         }
                         return 1;
                     })))));

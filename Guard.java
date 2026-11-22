@@ -36,8 +36,38 @@ final class Guard {
         mc.gui.setSubtitle(Component.literal(line).withStyle(Style.EMPTY.withColor(0xFFE066)));
     }
 
-    /** Wird fuer jeden gesendeten Befehl aufgerufen (ohne "/"). false = Befehl wird blockiert. */
+    /** Called for every sent command (without "/"). false = command is blocked. */
     static boolean allowCommand(String cmd) {
+        boolean ok = check(cmd);
+        if (ok) record(cmd);
+        return ok;
+    }
+
+    /** A /pay that goes out counts as an expense. */
+    private static void record(String cmd) {
+        String[] p = cmd.trim().split("\\s+");
+        if (p.length < 3 || !p[0].equalsIgnoreCase("pay")) return;
+        double a = PayFx.parseAmount(p[2]);
+        if (a > 0) {
+            History.add(p[1], a, false);
+            lastPayAmount = a;
+            lastPayAt = System.currentTimeMillis();
+        }
+    }
+
+    private static double lastPayAmount;
+    private static long lastPayAt;
+
+    /** True once if a server message about money you spent is just the echo of the /pay you sent a moment ago. */
+    static boolean isEchoOfOwnPay(double amount) {
+        if (lastPayAmount > 0 && Math.abs(amount - lastPayAmount) < 1 && System.currentTimeMillis() - lastPayAt < 6000) {
+            lastPayAmount = 0;
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean check(String cmd) {
         if (!Cfg.payWarn) return true;
         if (bypass) {
             bypass = false;
@@ -54,12 +84,12 @@ final class Guard {
         }
         pending = cmd;
         pendingAt = now;
-        warn(Minecraft.getInstance(), "GROSSE ZAHLUNG!",
-                "/pay " + p[1] + " " + PayFx.fmt(a) + " - zum Bestaetigen den Befehl nochmal senden oder /payfx ja");
+        warn(Minecraft.getInstance(), "BIG PAYMENT!",
+                "/pay " + p[1] + " " + PayFx.fmt(a) + " - send the command again to confirm, or type /payfx yes");
         return false;
     }
 
-    /** /payfx ja */
+    /** /payfx yes */
     static boolean confirm() {
         Minecraft mc = Minecraft.getInstance();
         if (pending == null || System.currentTimeMillis() - pendingAt > 15_000 || mc.getConnection() == null) return false;
@@ -70,7 +100,7 @@ final class Guard {
         return true;
     }
 
-    private static double priceOf(ItemStack st) {
+    static double priceOf(ItemStack st) {
         ItemLore lore = st.get(DataComponents.LORE);
         if (lore == null) return -1;
         double firstAny = -1;
@@ -113,8 +143,8 @@ final class Guard {
         }
         lastSlot = s;
         lastSlotAt = now;
-        warn(Minecraft.getInstance(), "TEURER KAUF!",
-                s.getItem().getHoverName().getString() + " kostet " + PayFx.fmt(price) + " - nochmal klicken zum Kaufen");
+        warn(Minecraft.getInstance(), "EXPENSIVE PURCHASE!",
+                s.getItem().getHoverName().getString() + " costs " + PayFx.fmt(price) + " - click again to buy");
         return false;
     }
 }

@@ -26,6 +26,10 @@ final class Cfg {
     static boolean flash = true;
     static boolean shake = true;
     static double auctionDist = 2.5;
+    static double taxPercent = 2;        // tax the server takes from your income (%)
+    static String payListMode = "both";  // off / both / received / sent
+    static boolean profitHud = false;    // show session profit on screen
+    static String expenseRegex = "";     // optional: pattern for messages about money you spent
     static double auctionMinutes = 0;
     static double auctionMin = 0;        // Mindestgebot
     static boolean auctionSay = false;   // Fuehrung im oeffentlichen Chat ansagen
@@ -64,6 +68,10 @@ final class Cfg {
             shake = Boolean.parseBoolean(p.getProperty("shake", "true"));
             auctionDist = Double.parseDouble(p.getProperty("auctionDist", "2.5"));
             auctionMinutes = Double.parseDouble(p.getProperty("auctionMinutes", "0"));
+            taxPercent = Double.parseDouble(p.getProperty("taxPercent", "2"));
+            profitHud = Boolean.parseBoolean(p.getProperty("profitHud", "false"));
+            payListMode = p.getProperty("payListMode", "both");
+            expenseRegex = p.getProperty("expenseRegex", "");
             auctionMin = Double.parseDouble(p.getProperty("auctionMin", "0"));
             auctionSay = Boolean.parseBoolean(p.getProperty("auctionSay", "false"));
             String[] t = p.getProperty("tiers", "500000,5000000,25000000,250000000,1000000000").split(",");
@@ -93,6 +101,10 @@ final class Cfg {
             p.setProperty("shake", Boolean.toString(shake));
             p.setProperty("auctionDist", Double.toString(auctionDist));
             p.setProperty("auctionMinutes", Double.toString(auctionMinutes));
+            p.setProperty("taxPercent", Double.toString(taxPercent));
+            p.setProperty("profitHud", Boolean.toString(profitHud));
+            p.setProperty("payListMode", payListMode);
+            p.setProperty("expenseRegex", expenseRegex);
             p.setProperty("auctionMin", Double.toString(auctionMin));
             p.setProperty("auctionSay", Boolean.toString(auctionSay));
             StringBuilder tb = new StringBuilder();

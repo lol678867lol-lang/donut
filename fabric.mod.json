@@ -3,7 +3,7 @@
   "id": "payfx",
   "version": "${version}",
   "name": "PayFX",
-  "description": "Effekte, wenn dir jemand Geld bezahlt - je hoeher der Betrag, desto groesser der Effekt.",
+  "description": "Effects when someone pays you - the bigger the amount, the bigger the effect. Includes pay warnings, auctions and a shortcut menu.",
   "authors": ["User"],
   "license": "MIT",
   "environment": "client",
