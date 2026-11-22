@@ -1,6 +1,8 @@
 package de.payfx;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -20,6 +22,7 @@ public class PayFxScreen extends Screen {
     private static final int ROW = 18, W = 300, TOP = 36;
     private static final double[] AMOUNTS = {100e3, 250e3, 500e3, 1e6, 2e6, 5e6, 10e6, 25e6, 50e6, 100e6, 250e6, 500e6, 1e9, 2e9, 5e9, 10e9};
     private static final double[] MINUTES = {0, 1, 2, 3, 5, 10, 15, 30, 60};
+    private static final double[] MINBID = {0, 100e3, 500e3, 1e6, 5e6, 10e6, 50e6, 100e6, 500e6, 1e9};
     private static final double[] DISTS = {1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0};
 
     private abstract static class Row {
@@ -35,6 +38,8 @@ public class PayFxScreen extends Screen {
     private final List<Row> rows = new ArrayList<>();
     private double scroll;
     private int x0;
+    private EditBox ahBox, rxBox;
+    private boolean rxOk = true;
 
     private Row header(String text) {
         return new Row(text) {
@@ -68,6 +73,14 @@ public class PayFxScreen extends Screen {
         };
     }
 
+    private Row action(String label, String valueText, Runnable r) {
+        return new Row(label) {
+            String value() { return valueText; }
+            int color() { return 0xFFFFD166; }
+            void click(int dir) { r.run(); }
+        };
+    }
+
     private void setTier(int i, double v) {
         double lo = i > 0 ? Cfg.tiers[i - 1] : 0;
         double hi = i < 4 ? Cfg.tiers[i + 1] : Double.MAX_VALUE;
@@ -97,6 +110,13 @@ public class PayFxScreen extends Screen {
         rows.add(toggle("Auktion anzeigen", () -> Cfg.auctionShow, v -> Cfg.auctionShow = v));
         rows.add(stepper("Abstand des Items", DISTS, () -> Cfg.auctionDist, v -> Cfg.auctionDist = v, d -> d + " Bloecke"));
         rows.add(stepper("Dauer (0 = ohne Zeit)", MINUTES, () -> Cfg.auctionMinutes, v -> Cfg.auctionMinutes = v, d -> d == 0 ? "ohne Zeit" : (int) (double) d + " Min"));
+        rows.add(stepper("Mindestgebot", MINBID, () -> Cfg.auctionMin, v -> Cfg.auctionMin = v, d -> d == 0 ? "keins" : PayFx.fmt(d)));
+        rows.add(toggle("Fuehrung im Chat ansagen", () -> Cfg.auctionSay, v -> Cfg.auctionSay = v));
+        rows.add(header("Verlauf"));
+        rows.add(action("Zahlungs-Verlauf", "oeffnen", () -> {
+            Minecraft m = Minecraft.getInstance();
+            m.setScreen(new HistoryScreen());
+        }));
         rows.add(header("Shortcut (Taste T)"));
         rows.add(toggle("T-Shortcut (Block im Blick)", () -> Cfg.tShortcut, v -> Cfg.tShortcut = v));
         rows.add(toggle("Nur mit gedruecktem Mausrad", () -> Cfg.needMiddle, v -> Cfg.needMiddle = v));
@@ -108,6 +128,24 @@ public class PayFxScreen extends Screen {
     }
 
     @Override
+    protected void init() {
+        x0 = (width - W) / 2;
+        ahBox = new EditBox(font, x0, height - 64, W, 14, Component.literal("Auktionshaus-Titel"));
+        ahBox.setMaxLength(60);
+        ahBox.setValue(Cfg.ahTitle);
+        ahBox.setResponder(v -> {
+            Cfg.ahTitle = v;
+            Cfg.save();
+        });
+        addWidget(ahBox);
+        rxBox = new EditBox(font, x0, height - 38, W, 14, Component.literal("Zahlungs-Muster"));
+        rxBox.setMaxLength(400);
+        rxBox.setValue(Cfg.regex);
+        rxBox.setResponder(v -> rxOk = PayFx.setRegex(v));
+        addWidget(rxBox);
+    }
+
+    @Override
     public boolean isPauseScreen() { return false; }
 
     private int contentH() {
@@ -115,7 +153,7 @@ public class PayFxScreen extends Screen {
     }
 
     private void clampScroll() {
-        int max = Math.max(0, contentH() + TOP + 40 - height);
+        int max = Math.max(0, contentH() + TOP + 90 - height);
         scroll = Math.max(-max, Math.min(0, scroll));
     }
 
@@ -126,7 +164,7 @@ public class PayFxScreen extends Screen {
         x0 = (width - W) / 2;
         int y = TOP + (int) scroll;
         for (Row r : rows) {
-            if (y + ROW > TOP - 4 && y < height - 22) {
+            if (y + ROW > TOP - 4 && y < height - 80) {
                 if (r.header()) {
                     g.fill(x0, y + 2, x0 + W, y + ROW, 0xFF2A1A4A);
                     g.drawString(font, r.label(), x0 + 6, y + 6, 0xFFFFD166);
@@ -141,17 +179,21 @@ public class PayFxScreen extends Screen {
             y += ROW;
         }
         g.fill(0, 0, width, TOP - 6, 0xE00A0A14);
-        g.fill(0, height - 20, width, height, 0xE00A0A14);
+        g.fill(0, height - 80, width, height, 0xF00A0A14);
+        g.drawString(font, "Auktionshaus-Fenstertitel (Teil des Titels, z.B. auction)", x0, height - 76, 0xFFB8B8C8);
+        g.drawString(font, "Zahlungs-Muster (Regex mit name / num / suf)" + (rxOk ? "" : "  - UNGUELTIG"), x0, height - 50, rxOk ? 0xFFB8B8C8 : 0xFFFF6A6A);
+        ahBox.render(g, mx, my, delta);
+        rxBox.render(g, mx, my, delta);
         String title = "P A Y F X";
         g.drawString(font, title, (width - font.width(title)) / 2, 12, 0xFFFFD166);
-        String hint = "Klick: an/aus oder Wert (links < kleiner, rechts > groesser)   Mausrad: scrollen   C/ESC: zu";
-        g.drawString(font, hint, (width - font.width(hint)) / 2, height - 13, 0xFF7A7A90);
+        String hint = "Klick: an/aus oder Wert (links < kleiner, rechts > groesser)   Mausrad: scrollen   ESC: zu";
+        g.drawString(font, hint, (width - font.width(hint)) / 2, height - 14, 0xFF7A7A90);
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         double mx = event.x(), my = event.y();
-        if (my < TOP - 6 || my > height - 20 || mx < x0 || mx >= x0 + W) return super.mouseClicked(event, doubleClick);
+        if (my < TOP - 6 || my > height - 80 || mx < x0 || mx >= x0 + W) return super.mouseClicked(event, doubleClick);
         int i = (int) ((my - TOP - scroll) / ROW);
         if (i >= 0 && i < rows.size()) {
             Row r = rows.get(i);
@@ -173,6 +215,7 @@ public class PayFxScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent event) {
+        if (getFocused() instanceof EditBox) return super.keyPressed(event);
         if (event.key() == GLFW.GLFW_KEY_C) {
             onClose();
             return true;

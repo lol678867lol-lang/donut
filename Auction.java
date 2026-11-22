@@ -14,7 +14,9 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +33,8 @@ final class Auction {
     private static ItemEntity entity;
     private static Vec3 pos = Vec3.ZERO;
     private static long endAt;
+    private static double lastMinutes;
+    private static final Deque<ItemStack> QUEUE = new ArrayDeque<>();
     private static int lastBeep = -1;
     private static final Map<String, Double> TOTALS = new LinkedHashMap<>();
 
@@ -44,9 +48,17 @@ final class Auction {
         return l;
     }
 
+    /** Fuehrender, aber nur wenn er das Mindestgebot erreicht hat. */
+    private static Map.Entry<String, Double> valid() {
+        List<Map.Entry<String, Double>> r = ranking();
+        if (r.isEmpty() || r.get(0).getValue() < Cfg.auctionMin) return null;
+        return r.get(0);
+    }
+
     private static String leaderText() {
         List<Map.Entry<String, Double>> r = ranking();
-        if (r.isEmpty()) return "noch kein Gebot";
+        if (r.isEmpty()) return "noch kein Gebot" + (Cfg.auctionMin > 0 ? " (min. " + PayFx.fmt(Cfg.auctionMin) + ")" : "");
+        if (valid() == null) return r.get(0).getKey() + " " + PayFx.fmt(r.get(0).getValue()) + " (min. " + PayFx.fmt(Cfg.auctionMin) + ")";
         return r.get(0).getKey() + "  " + PayFx.fmt(r.get(0).getValue());
     }
 
@@ -76,10 +88,16 @@ final class Auction {
     /** Eine Zahlung ist angekommen. */
     static void pay(String who, double amount) {
         if (!active) return;
-        String before = ranking().isEmpty() ? "" : ranking().get(0).getKey();
+        Map.Entry<String, Double> was = valid();
+        String before = was == null ? "" : was.getKey();
         TOTALS.merge(who, amount, Double::sum);
-        String after = ranking().get(0).getKey();
-        if (!after.equals(before)) {
+        Map.Entry<String, Double> now = valid();
+        String after = now == null ? "" : now.getKey();
+        if (!after.isEmpty() && !after.equals(before)) {
+            Minecraft mm = Minecraft.getInstance();
+            if (Cfg.auctionSay && mm.getConnection() != null) {
+                mm.getConnection().sendChat("Hoechstgebot auf " + item.getHoverName().getString() + ": " + after + " mit " + PayFx.fmt(TOTALS.get(after)));
+            }
             Minecraft m = Minecraft.getInstance();
             if (Cfg.sounds) m.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.PLAYER_LEVELUP, 1.2F));
             m.gui.setTimes(3, 30, 10);
@@ -96,30 +114,47 @@ final class Auction {
 
     /** Auktion beenden und den Gewinner zeigen. */
     static void finish(Minecraft mc) {
+        Map.Entry<String, Double> win = valid();
         List<Map.Entry<String, Double>> r = ranking();
         active = false;
         endAt = 0;
         remove();
-        if (mc.player == null) return;
-        if (r.isEmpty()) {
-            mc.player.displayClientMessage(Component.literal("[Auktion] beendet - es gab kein Gebot."), false);
-            return;
+        String itemName = item.getHoverName().getString();
+        if (mc.player != null) {
+            if (win == null) {
+                mc.player.displayClientMessage(Component.literal("[Auktion] beendet - kein gueltiges Gebot"
+                        + (Cfg.auctionMin > 0 ? " (Mindestgebot " + PayFx.fmt(Cfg.auctionMin) + ")" : "") + "."), false);
+            } else {
+                mc.player.displayClientMessage(Component.literal("[Auktion] beendet: " + win.getKey() + " gewinnt mit " + PayFx.fmt(win.getValue())), false);
+                for (int i = 1; i < Math.min(3, r.size()); i++) {
+                    mc.player.displayClientMessage(Component.literal("[Auktion] " + (i + 1) + ". " + r.get(i).getKey() + "  " + PayFx.fmt(r.get(i).getValue())), false);
+                }
+                if (Cfg.sounds) mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 1.0F));
+                mc.gui.setTimes(5, 80, 20);
+                mc.gui.setTitle(Component.literal("GEWINNER: " + win.getKey()).withStyle(Style.EMPTY.withColor(0x66FF99)));
+                mc.gui.setSubtitle(Component.literal(PayFx.fmt(win.getValue()) + " - " + itemName).withStyle(Style.EMPTY.withColor(0xFFD166)));
+                if (Cfg.auctionSay && mc.getConnection() != null) {
+                    mc.getConnection().sendChat("Auktion beendet: " + win.getKey() + " gewinnt " + itemName + " mit " + PayFx.fmt(win.getValue()));
+                }
+            }
         }
-        String w = r.get(0).getKey() + " gewinnt mit " + PayFx.fmt(r.get(0).getValue());
-        mc.player.displayClientMessage(Component.literal("[Auktion] beendet: " + w), false);
-        for (int i = 1; i < Math.min(3, r.size()); i++) {
-            mc.player.displayClientMessage(Component.literal("[Auktion] " + (i + 1) + ". " + r.get(i).getKey() + "  " + PayFx.fmt(r.get(i).getValue())), false);
+        // Naechstes Item aus der Warteschlange
+        if (!QUEUE.isEmpty() && mc.player != null) {
+            beginWith(mc, mc.player, QUEUE.poll(), lastMinutes);
+            mc.player.displayClientMessage(Component.literal("[Auktion] naechstes Item: " + item.getHoverName().getString()
+                    + " (noch " + QUEUE.size() + " in der Warteschlange)"), false);
         }
-        if (Cfg.sounds) mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, 1.0F));
-        mc.gui.setTimes(5, 80, 20);
-        mc.gui.setTitle(Component.literal("GEWINNER: " + r.get(0).getKey()).withStyle(Style.EMPTY.withColor(0x66FF99)));
-        mc.gui.setSubtitle(Component.literal(PayFx.fmt(r.get(0).getValue()) + " - " + item.getHoverName().getString()).withStyle(Style.EMPTY.withColor(0xFFD166)));
     }
 
     private static void begin(Minecraft mc, LocalPlayer p, double minutes) {
+        beginWith(mc, p, p.getMainHandItem().copy(), minutes);
+    }
+
+    private static void beginWith(Minecraft mc, LocalPlayer p, ItemStack stack, double minutes) {
         remove();
         TOTALS.clear();
-        item = p.getMainHandItem().copy();
+        lastMinutes = minutes;
+        item = stack;
         Vec3 look = p.getViewVector(1.0F);
         Vec3 flat = new Vec3(look.x, 0, look.z);
         flat = flat.lengthSqr() < 1.0E-4 ? new Vec3(0, 0, 1) : flat.normalize();
@@ -170,6 +205,7 @@ final class Auction {
             long left = Math.max(0, endAt - System.currentTimeMillis()) / 1000;
             head += String.format("  [%d:%02d]", left / 60, left % 60);
         }
+        if (!QUEUE.isEmpty()) head += "  (+" + QUEUE.size() + " wartend)";
         g.drawString(mc.font, head, W - mc.font.width(head) - 6, y, 0xFFFFD166);
         y += 11;
         if (r.isEmpty()) {
@@ -214,7 +250,27 @@ final class Auction {
                     finish(Minecraft.getInstance());
                     return 1;
                 }))
+                .then(ClientCommandManager.literal("queue").executes(ctx -> {
+                    Minecraft mc = Minecraft.getInstance();
+                    if (mc.player == null || mc.player.getMainHandItem().isEmpty()) {
+                        ctx.getSource().sendFeedback(Component.literal("Nimm das Item in die Hand, das du in die Warteschlange legen willst."));
+                        return 0;
+                    }
+                    QUEUE.add(mc.player.getMainHandItem().copy());
+                    ctx.getSource().sendFeedback(Component.literal("In die Warteschlange gelegt (" + QUEUE.size() + "). Es startet automatisch, wenn die aktuelle Auktion endet."));
+                    return 1;
+                }))
+                .then(ClientCommandManager.literal("min")
+                    .then(ClientCommandManager.argument("betrag", com.mojang.brigadier.arguments.StringArgumentType.word()).executes(ctx -> {
+                        double a = PayFx.parseAmount(com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "betrag"));
+                        if (a < 0) return 0;
+                        Cfg.auctionMin = a;
+                        Cfg.save();
+                        ctx.getSource().sendFeedback(Component.literal("Mindestgebot: " + PayFx.fmt(a)));
+                        return 1;
+                    })))
                 .then(ClientCommandManager.literal("stop").executes(ctx -> {
+                    QUEUE.clear();
                     active = false;
                     remove();
                     ctx.getSource().sendFeedback(Component.literal("Auktion abgebrochen."));

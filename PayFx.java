@@ -110,6 +110,18 @@ public class PayFx implements ClientModInitializer {
 
     // ------------------------------------------------------------------ Nachrichten
 
+    /** Muster setzen (aus dem Menue). false = ungueltig. */
+    static boolean setRegex(String r) {
+        try {
+            pattern = Pattern.compile(r);
+            Cfg.regex = r;
+            Cfg.save();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     static void say(Minecraft mc, String s) {
         if (mc.player != null) mc.player.displayClientMessage(Component.literal("[PayFX] " + s), false);
     }
@@ -137,6 +149,7 @@ public class PayFx implements ClientModInitializer {
         if (who == null || num == null) return;
         double a = parse(num, suf == null ? "" : suf);
         if (a < 0) return;
+        History.add(who, a);
         Auction.pay(who, a);
         if (Cfg.effects) trigger(mc, who, a);
     }
@@ -255,6 +268,22 @@ public class PayFx implements ClientModInitializer {
             return;
         }
         LocalPlayer p = mc.player;
+        if (tier.ordinal() >= Tier.LARGE.ordinal()) {
+            double ang = age * 0.45;
+            for (int k = 0; k < 2; k++) {
+                double a = ang + k * Math.PI;
+                mc.level.addParticle(ParticleTypes.END_ROD, p.getX() + Math.cos(a) * 1.4, p.getY() + (age % 40) / 40.0 * 2.2,
+                        p.getZ() + Math.sin(a) * 1.4, 0, 0.02, 0);
+            }
+            if (age % 20 == 0) {
+                for (int i = 0; i < 24; i++) {
+                    double a = i * Math.PI / 12.0;
+                    double r = 0.6 + age / 8.0;
+                    mc.level.addParticle(ParticleTypes.FIREWORK, p.getX() + Math.cos(a) * r, p.getY() + 0.2, p.getZ() + Math.sin(a) * r,
+                            Math.cos(a) * 0.1, 0.02, Math.sin(a) * 0.1);
+                }
+            }
+        }
         switch (tier) {
             case SMALL:
                 if (age % 4 == 0) burst(mc, ParticleTypes.HAPPY_VILLAGER, 4, 1.2, 0.2, 0.1);
@@ -302,8 +331,30 @@ public class PayFx implements ClientModInitializer {
         }
     }
 
+    /** Banner oben: rutscht herein, der Betrag zaehlt hoch. */
+    private static void banner(GuiGraphics g, Minecraft mc) {
+        if (tier.ordinal() < Tier.MEDIUM.ordinal()) return;
+        int W = mc.getWindow().getGuiScaledWidth();
+        int stay = tier.ticks - 12;
+        int y;
+        if (age < 8) y = -22 + age * 3;
+        else if (age > stay) y = -(age - stay) * 3;
+        else y = 2;
+        if (y < -22) return;
+        double shown = amount * Math.min(1.0, age / 40.0);
+        String s = "+" + fmt(shown) + "   von " + payer;
+        int w = mc.font.width(s) + 40;
+        int x = (W - w) / 2;
+        int c = colorOf(tier);
+        if (tier == Tier.CRAZY) c = hsv((age % 40) / 40.0F);
+        g.fill(x - 2, y - 2, x + w + 2, y + 20, 0xFF000000 | c);
+        g.fill(x, y, x + w, y + 18, 0xF0101018);
+        g.drawString(mc.font, s, x + 20, y + 5, 0xFF000000 | c);
+    }
+
     private static void hud(GuiGraphics g, Minecraft mc) {
         Auction.hud(g, mc);
+        banner(g, mc);
         if (tier == Tier.NONE || tier == Tier.SMALL || !Cfg.flash) return;
         int W = mc.getWindow().getGuiScaledWidth(), H = mc.getWindow().getGuiScaledHeight();
         float fade = 1.0F - (float) age / tier.ticks;
@@ -336,6 +387,7 @@ public class PayFx implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         Cfg.load();
+        History.load();
         try {
             pattern = Pattern.compile(Cfg.regex);
         } catch (Exception e) {
@@ -393,6 +445,11 @@ public class PayFx implements ClientModInitializer {
                 .then(ClientCommandManager.literal("learn").executes(ctx -> {
                     learn = true;
                     ctx.getSource().sendFeedback(Component.literal("Lernmodus: Lass dir jetzt etwas bezahlen (oder /payfx test geht nicht). Die naechste Nachricht mit $ wird als Zahlungsformat gelernt."));
+                    return 1;
+                }))
+                .then(ClientCommandManager.literal("history").executes(ctx -> {
+                    Minecraft m = Minecraft.getInstance();
+                    m.execute(() -> m.setScreen(new HistoryScreen()));
                     return 1;
                 }))
                 .then(ClientCommandManager.literal("ja").executes(ctx -> {

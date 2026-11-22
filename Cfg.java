@@ -27,6 +27,8 @@ final class Cfg {
     static boolean shake = true;
     static double auctionDist = 2.5;
     static double auctionMinutes = 0;
+    static double auctionMin = 0;        // Mindestgebot
+    static boolean auctionSay = false;   // Fuehrung im oeffentlichen Chat ansagen
     /** Betrag, ab dem Stufe 1 (klein) ... 5 (crazy) beginnt (Effekt gilt fuer Betraege darueber). */
     static double[] tiers = {500_000, 5_000_000, 25_000_000, 250_000_000, 1_000_000_000};
     static boolean[] tierOn = {true, true, true, true, true};
@@ -62,6 +64,8 @@ final class Cfg {
             shake = Boolean.parseBoolean(p.getProperty("shake", "true"));
             auctionDist = Double.parseDouble(p.getProperty("auctionDist", "2.5"));
             auctionMinutes = Double.parseDouble(p.getProperty("auctionMinutes", "0"));
+            auctionMin = Double.parseDouble(p.getProperty("auctionMin", "0"));
+            auctionSay = Boolean.parseBoolean(p.getProperty("auctionSay", "false"));
             String[] t = p.getProperty("tiers", "500000,5000000,25000000,250000000,1000000000").split(",");
             for (int i = 0; i < 5 && i < t.length; i++) tiers[i] = Double.parseDouble(t[i].trim());
             String on = p.getProperty("tierOn", "11111");
@@ -89,6 +93,8 @@ final class Cfg {
             p.setProperty("shake", Boolean.toString(shake));
             p.setProperty("auctionDist", Double.toString(auctionDist));
             p.setProperty("auctionMinutes", Double.toString(auctionMinutes));
+            p.setProperty("auctionMin", Double.toString(auctionMin));
+            p.setProperty("auctionSay", Boolean.toString(auctionSay));
             StringBuilder tb = new StringBuilder();
             StringBuilder on = new StringBuilder();
             for (int i = 0; i < 5; i++) {
