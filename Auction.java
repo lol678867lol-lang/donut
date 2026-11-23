@@ -106,6 +106,13 @@ final class Auction {
             m.gui.setTitle(Component.literal(after + " leads!").withStyle(Style.EMPTY.withColor(0x66FF99)));
             m.gui.setSubtitle(Component.literal(PayFx.fmt(TOTALS.get(after))).withStyle(Style.EMPTY.withColor(0xFFD166)));
         }
+        if (endAt > 0 && Cfg.auctionSnipe > 0) {
+            long extend = (long) (Cfg.auctionSnipe * 1000);
+            if (endAt - System.currentTimeMillis() < extend) {
+                endAt = System.currentTimeMillis() + extend;
+                lastBeep = -1;
+            }
+        }
         label();
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {

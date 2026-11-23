@@ -106,18 +106,72 @@ final class History {
         return sum(true, since) - tax(since) - sum(false, since);
     }
 
+    static long dayStart(int daysAgo) {
+        return LocalDate.now().minusDays(daysAgo).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli();
+    }
+
+    /** Profit (after tax) between two points in time. */
+    static double netBetween(long from, long to) {
+        double in = 0, out = 0;
+        for (Entry e : LIST) {
+            if (e.ts() < from || e.ts() >= to) continue;
+            if (e.income()) in += e.amount();
+            else out += e.amount();
+        }
+        return in - in * Cfg.taxPercent / 100.0 - out;
+    }
+
+    static double sumBetween(boolean income, long from, long to) {
+        double s = 0;
+        for (Entry e : LIST) if (e.income() == income && e.ts() >= from && e.ts() < to) s += e.amount();
+        return s;
+    }
+
+    /** Number of received payments per player. */
+    static Map<String, Integer> counts() {
+        Map<String, Integer> m = new HashMap<>();
+        for (Entry e : LIST) if (e.income()) m.merge(e.name(), 1, Integer::sum);
+        return m;
+    }
+
+    static boolean knows(String name) {
+        for (Entry e : LIST) if (e.name().equalsIgnoreCase(name)) return true;
+        return false;
+    }
+
+    /** Writes config/payfx-export.csv (open it in Excel). Returns the file path or null. */
+    static String export() {
+        try {
+            Path f = FabricLoader.getInstance().getConfigDir().resolve("payfx-export.csv");
+            java.time.format.DateTimeFormatter df = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
+            StringBuilder sb = new StringBuilder("date;type;name;amount;tax_on_income\n");
+            for (Entry e : LIST) {
+                sb.append(df.format(java.time.Instant.ofEpochMilli(e.ts()))).append(';').append(e.income() ? "income" : "expense").append(';')
+                        .append(e.name()).append(';').append((long) e.amount()).append(';')
+                        .append(e.income() ? (long) (e.amount() * Cfg.taxPercent / 100.0) : 0).append('\n');
+            }
+            Files.writeString(f, sb.toString());
+            return f.toString();
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
     /** Pay list on the screen: the last 5 payments (green = received, red = sent), filtered by Cfg.payListMode. */
     static void payList(GuiGraphics g, Minecraft mc) {
         String mode = Cfg.payListMode;
         if (mode.equals("off")) return;
-        int y = Cfg.profitHud ? 20 : 6;
+        boolean right = Cfg.payListSide.equals("right");
+        int y = right ? 70 : (Cfg.profitHud ? 32 : 6);
         int shown = 0;
-        for (int i = LIST.size() - 1; i >= 0 && shown < 5; i--) {
+        int max = (int) Cfg.payListCount;
+        int W = mc.getWindow().getGuiScaledWidth();
+        for (int i = LIST.size() - 1; i >= 0 && shown < max; i--) {
             Entry e = LIST.get(i);
             if (e.name().startsWith("Auction: ")) continue;
             if (e.income() ? mode.equals("sent") : mode.equals("received")) continue;
             String s = (e.income() ? "+" : "-") + PayFx.fmt(e.amount()) + "  " + e.name();
-            g.drawString(mc.font, s, 6, y, e.income() ? 0xFF66FF99 : 0xFFFF6A6A);
+            g.drawString(mc.font, s, right ? W - mc.font.width(s) - 6 : 6, y, e.income() ? 0xFF66FF99 : 0xFFFF6A6A);
             y += 10;
             shown++;
         }
@@ -129,5 +183,7 @@ final class History {
         double n = net(sessionStart);
         String s = "Session profit: " + PayFx.fmtSigned(n);
         g.drawString(mc.font, s, 6, 6, n >= 0 ? 0xFF66FF99 : 0xFFFF6A6A);
+        String t = "Tax lost (" + Cfg.taxPercent + "%): -" + PayFx.fmt(tax(sessionStart));
+        g.drawString(mc.font, t, 6, 18, 0xFFFFAA44);
     }
 }

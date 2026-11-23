@@ -22,6 +22,8 @@ public class PayFxScreen extends Screen {
     private static final int ROW = 18, W = 300, TOP = 36;
     private static final double[] AMOUNTS = {100e3, 250e3, 500e3, 1e6, 2e6, 5e6, 10e6, 25e6, 50e6, 100e6, 250e6, 500e6, 1e9, 2e9, 5e9, 10e9};
     private static final double[] TAX = {0, 1, 2, 3, 4, 5, 7.5, 10, 12.5, 15, 20, 25, 30};
+    private static final double[] COUNTS = {3, 5, 8, 10};
+    private static final double[] SNIPE = {0, 5, 10, 20, 30, 60};
     private static final double[] MINUTES = {0, 1, 2, 3, 5, 10, 15, 30, 60};
     private static final double[] MINBID = {0, 100e3, 500e3, 1e6, 5e6, 10e6, 50e6, 100e6, 500e6, 1e9};
     private static final double[] DISTS = {1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0};
@@ -90,6 +92,8 @@ public class PayFxScreen extends Screen {
 
     public PayFxScreen() {
         super(Component.literal("PayFX"));
+        rows.add(action(">> STATISTICS & CHARTS <<", "open", () -> Minecraft.getInstance().setScreen(new HistoryScreen())));
+        rows.add(action(">> AUCTION LIST (search) <<", "open", () -> Minecraft.getInstance().setScreen(new AuctionScreen())));
         rows.add(header("Payment effects"));
         rows.add(toggle("Effects (master switch)", () -> Cfg.effects, v -> Cfg.effects = v));
         rows.add(toggle("Sounds", () -> Cfg.sounds, v -> Cfg.sounds = v));
@@ -113,6 +117,7 @@ public class PayFxScreen extends Screen {
         rows.add(stepper("Duration (0 = no limit)", MINUTES, () -> Cfg.auctionMinutes, v -> Cfg.auctionMinutes = v, d -> d == 0 ? "no limit" : (int) (double) d + " min"));
         rows.add(stepper("Minimum bid", MINBID, () -> Cfg.auctionMin, v -> Cfg.auctionMin = v, d -> d == 0 ? "none" : PayFx.fmt(d)));
         rows.add(toggle("Announce leader in chat", () -> Cfg.auctionSay, v -> Cfg.auctionSay = v));
+        rows.add(stepper("Anti-sniping (extend on late bid)", SNIPE, () -> Cfg.auctionSnipe, v -> Cfg.auctionSnipe = v, d -> d == 0 ? "off" : (int) (double) d + " s"));
         rows.add(header("Profit & statistics"));
         rows.add(stepper("Tax on income", TAX, () -> Cfg.taxPercent, v -> Cfg.taxPercent = v, d -> d + "%"));
         rows.add(toggle("Show session profit on screen", () -> Cfg.profitHud, v -> Cfg.profitHud = v));
@@ -140,6 +145,17 @@ public class PayFxScreen extends Screen {
                 Cfg.payListMode = m[(i + (dir > 0 ? 1 : m.length - 1)) % m.length];
             }
         });
+        rows.add(stepper("Pay list entries", COUNTS, () -> Cfg.payListCount, v -> Cfg.payListCount = v, d -> Integer.toString((int) (double) d)));
+        rows.add(new Row("Pay list position") {
+            String value() { return Cfg.payListSide.equals("right") ? "top right" : "top left"; }
+            int color() { return 0xFFFFD166; }
+            void click(int dir) { Cfg.payListSide = Cfg.payListSide.equals("right") ? "left" : "right"; }
+        });
+        rows.add(action("Export statistics (CSV)", "export", () -> {
+            String f = History.export();
+            Minecraft m = Minecraft.getInstance();
+            PayFx.say(m, f == null ? "Export failed." : "Exported to " + f);
+        }));
         rows.add(action("Statistics (profit, history)", "open", () -> {
             Minecraft m = Minecraft.getInstance();
             m.setScreen(new HistoryScreen());

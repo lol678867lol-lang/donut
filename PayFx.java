@@ -460,6 +460,9 @@ public class PayFx implements ClientModInitializer {
         KeyMapping openGui = KeyBindingHelper.registerKeyBinding(new KeyMapping(
                 "key.payfx.gui", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_C, category));
 
+        KeyMapping openStats = KeyBindingHelper.registerKeyBinding(new KeyMapping(
+                "key.payfx.stats", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V, category));
+
         // System messages and action bar text (many servers send payments there) ...
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> onMessage(message.getString()));
         // ... and normal chat messages
@@ -471,6 +474,9 @@ public class PayFx implements ClientModInitializer {
         ClientTickEvents.START_CLIENT_TICK.register(Shortcut::poll);
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+            while (openStats.consumeClick()) {
+                if (mc.screen == null && mc.player != null) mc.setScreen(new HistoryScreen());
+            }
             while (openGui.consumeClick()) {
                 if (mc.screen == null && mc.player != null) mc.setScreen(new PayFxScreen());
             }
@@ -549,6 +555,11 @@ public class PayFx implements ClientModInitializer {
                         ctx.getSource().sendFeedback(Component.literal("Pay list: " + md));
                         return 1;
                     })))
+                .then(ClientCommandManager.literal("export").executes(ctx -> {
+                    String f = History.export();
+                    ctx.getSource().sendFeedback(Component.literal(f == null ? "Export failed." : "Exported to " + f + " (open it with Excel)"));
+                    return f == null ? 0 : 1;
+                }))
                 .then(ClientCommandManager.literal("undo").executes(ctx -> {
                     History.Entry e = History.undoLast();
                     ctx.getSource().sendFeedback(Component.literal(e == null ? "Nothing to undo."

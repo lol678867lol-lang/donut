@@ -27,6 +27,9 @@ final class Cfg {
     static boolean shake = true;
     static double auctionDist = 2.5;
     static double taxPercent = 2;        // tax the server takes from your income (%)
+    static double payListCount = 5;      // entries in the pay list
+    static String payListSide = "left";  // left / right
+    static double auctionSnipe = 0;      // seconds; a bid in the last N seconds extends the auction (0 = off)
     static String payListMode = "both";  // off / both / received / sent
     static boolean profitHud = false;    // show session profit on screen
     static String expenseRegex = "";     // optional: pattern for messages about money you spent
@@ -71,6 +74,9 @@ final class Cfg {
             taxPercent = Double.parseDouble(p.getProperty("taxPercent", "2"));
             profitHud = Boolean.parseBoolean(p.getProperty("profitHud", "false"));
             payListMode = p.getProperty("payListMode", "both");
+            payListCount = Double.parseDouble(p.getProperty("payListCount", "5"));
+            payListSide = p.getProperty("payListSide", "left");
+            auctionSnipe = Double.parseDouble(p.getProperty("auctionSnipe", "0"));
             expenseRegex = p.getProperty("expenseRegex", "");
             auctionMin = Double.parseDouble(p.getProperty("auctionMin", "0"));
             auctionSay = Boolean.parseBoolean(p.getProperty("auctionSay", "false"));
@@ -104,6 +110,9 @@ final class Cfg {
             p.setProperty("taxPercent", Double.toString(taxPercent));
             p.setProperty("profitHud", Boolean.toString(profitHud));
             p.setProperty("payListMode", payListMode);
+            p.setProperty("payListCount", Double.toString(payListCount));
+            p.setProperty("payListSide", payListSide);
+            p.setProperty("auctionSnipe", Double.toString(auctionSnipe));
             p.setProperty("expenseRegex", expenseRegex);
             p.setProperty("auctionMin", Double.toString(auctionMin));
             p.setProperty("auctionSay", Boolean.toString(auctionSay));

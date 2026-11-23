@@ -85,7 +85,8 @@ final class Guard {
         pending = cmd;
         pendingAt = now;
         warn(Minecraft.getInstance(), "BIG PAYMENT!",
-                "/pay " + p[1] + " " + PayFx.fmt(a) + " - send the command again to confirm, or type /payfx yes");
+                "/pay " + p[1] + " " + PayFx.fmt(a) + (History.knows(p[1]) ? "" : "  (NEW recipient - check the name!)")
+                        + " - send the command again to confirm, or type /payfx yes");
         return false;
     }
 
